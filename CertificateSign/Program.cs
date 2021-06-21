@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography.Xml;
 using System.Text;
 using System.Xml;
 
@@ -8,14 +9,14 @@ namespace CertificateSign
 {
     class Program
     {
-        const string certPath = @"C:\RSA256.p12";
-        const string certPassword = "password";
+        const string certPath = @"C:\repo\own\ecp\Sherkhan-2021 123456\RSA256_983cadcfdd55a14bf33799d1aa1665f081d2622f.p12";
+        const string certPassword = "Goha1998";
 
         static void Main(string[] args)
         {
             X509Certificate2 cert = new X509Certificate2(certPath, certPassword, X509KeyStorageFlags.Exportable);
             UnicodeEncoding encoding = new UnicodeEncoding();
-            byte[] data = encoding.GetBytes("test");
+            byte[] data = encoding.GetBytes("<Root/>");
 
             byte[] signature = GetSignature(data, cert);
             bool ver = ValidateSignature(data, signature, cert);
@@ -24,7 +25,86 @@ namespace CertificateSign
             byte[] signedByte = Convert.FromBase64String(signedString);
 
             string publicKey = cert.PublicKey.Key.ToXmlString(false);
+            var publicKey2 = cert.PublicKey.Key.ToString();
             bool res = ValidateSignatureByPublicKey(data, signature, publicKey);
+
+            SignXMLDocument(data, cert, "sign.xml");
+            bool verxml = VerifyXMLDocument("sign.xml", cert);
+
+        }
+
+        private static void SignXMLDocument(byte[] xmlDocumentBuffer, X509Certificate2 certificate, string signedXMLPath)
+        {
+            // Load xmlDocument data in to an XML Document
+            XmlDocument xmlDocument = new XmlDocument();
+            string xml = $"<Root><Broker description =\"Наименование брокера\">АО \"Jýsan Invest\"</Broker>"
+   + "<ReportDate description=\"Дата выдачи\">24.05.2021</ReportDate>"
+   + "<Client description=\"Клиент\">ӘБІЛДА МИРАС НҰРЖАНҰЛЫ</Client>"
+   + "<AccountNum description=\"Номер лицевого счета\">01010108848</AccountNum>"
+   + "<Email description=\"Электронный адрес клиента\">miras703@gmail.com</Email>"
+   + "<ReportType description=\"ReportType\">Уведомление об открытии лицевого счета</ReportType>"
+   + "<OperationType description=\"Вид операции\">Открытие лицевого счета</OperationType>"
+   + "<ContractNum description=\"Договор\">№8858 24.05.2021</ContractNum>"
+   + "<OrderNum description=\"Данные приказа\">№1 от 24.05.2021</OrderNum>"
+   + "<OrderExecDate description=\"Дата исполнения приказа\">24.05.2021</OrderExecDate>"
+   + "<InternetLogin description=\"Логин\">3130544</InternetLogin>"
+   + "<clientID description=\"Идентификатор клиента\">3130544</clientID></Root>";
+            xmlDocument.LoadXml(xml);
+
+            // Sign the XML document using the certificate private key
+            using (var rsaKey = certificate.PrivateKey)
+            {
+                var signedXml = new SignedXml(xmlDocument);
+                signedXml.SigningKey = rsaKey;
+
+                var reference = new Reference();
+                reference.Uri = "";
+
+                var env = new XmlDsigEnvelopedSignatureTransform();
+                reference.AddTransform(env);
+
+                signedXml.AddReference(reference);
+
+                signedXml.ComputeSignature();
+
+                var xmlDigitalSignature = signedXml.GetXml();
+
+                xmlDocument.DocumentElement.AppendChild(xmlDocument.ImportNode(xmlDigitalSignature, true));
+
+                xmlDocument.Save(signedXMLPath);
+            }
+        }
+        private static bool VerifyXMLDocument(string xmlFilePath, X509Certificate2 certificate)
+        {
+            XmlDocument xmlDocument = new XmlDocument();
+            xmlDocument.Load(xmlFilePath);
+
+            var signedXml = new SignedXml(xmlDocument);
+
+            // Load the XML Signature
+            var nodeList = xmlDocument.GetElementsByTagName("Signature");
+
+            signedXml.LoadXml((XmlElement)nodeList[0]);
+
+
+            //XmlDocument xdoc = new XmlDocument();
+            //xdoc.LoadXml(certificate.PublicKey.Key.ToXmlString(false));
+
+            //RSAParameters RSAKeyInfo = new RSAParameters();
+            //RSAKeyInfo.Modulus = Convert.FromBase64String(xdoc.SelectSingleNode("./RSAKeyValue/Modulus").InnerText);
+            //RSAKeyInfo.Exponent = Convert.FromBase64String(xdoc.SelectSingleNode("./RSAKeyValue/Exponent").InnerText);
+
+            //RSACryptoServiceProvider RSA = new RSACryptoServiceProvider();
+            //RSA.ImportParameters(RSAKeyInfo);
+            //bool result = signedXml.CheckSignature(RSA);
+
+            //return RSA.VerifyData(inputData, CryptoConfig.MapNameToOID("SHA256"), signature);
+            // Verify the integrity of the xml document
+
+            using (var rsaKey = certificate.PublicKey.Key)
+            {
+                return signedXml.CheckSignature(rsaKey);
+            }
         }
 
         public static byte[] GetSignature(byte[] inputData, X509Certificate2 cert)
